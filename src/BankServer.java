@@ -1,11 +1,24 @@
-import java.util.HashMap;
-import java.util.Map;
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 
 public class BankServer {
     private static final int PORT = 12345;
-    private static Map<String, String> userDatabase = new HashMap<>();
+    private static Map<String, String> userDatabase = new ConcurrentHashMap<>();
+    private static Map<String, SecretKey> masterSecrets = new ConcurrentHashMap<>();
+    private static Map<String, Double> accountBalances = new ConcurrentHashMap<>();
+    private static final String ALGORITHM = "AES/ECB/PKCS5Padding";
+    private static final String keyString = "mySimpleSharedKey"; // Ensure this is sufficiently secure and random for production use
+    private static final byte[] keyBytes = keyString.getBytes(StandardCharsets.UTF_8);
+    private static final SecretKey sharedKey = new SecretKeySpec(Arrays.copyOf(keyBytes, 16), "AES"); // Using AES-128. Adjust the length as necessary.
 
     public static void main(String[] args) {
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
@@ -34,12 +47,13 @@ public class BankServer {
                  PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
 
                 String request;
-                // Keep listening for client requests on the same connection
+                String username = null;
+
                 while ((request = in.readLine()) != null) {
                     switch (request) {
                         case "REGISTER":
-                            String username = in.readLine();
-                            String password = in.readLine(); // Hash in a real system
+                            username = in.readLine();
+                            String password = in.readLine();
                             String registrationResult = registerUser(username, password);
                             out.println(registrationResult);
                             break;
@@ -50,14 +64,43 @@ public class BankServer {
                             out.println(loggedIn ? "LOGGED IN" : "LOGIN FAILED");
                             break;
                         case "QUIT":
-                            // Client wants to close the connection
                             return; // Exit the thread
+                        case "VIEW BALANCE":
+                            if (username != null && userDatabase.containsKey(username)) {
+                                double balance = accountBalances.getOrDefault(username, 0.0);
+                                out.println("Your account balance is: $" + balance);
+                            } else {
+                                out.println("ERROR: You need to log in first.");
+                            }
+                            break;
+                        case "DEPOSIT":
+                            double amount = Double.parseDouble(in.readLine());
+                            if (username != null && userDatabase.containsKey(username)) {
+                                accountBalances.merge(username, amount, Double::sum);
+                                out.println("Deposit successful. New balance: $" + accountBalances.get(username));
+                            } else {
+                                out.println("ERROR: You need to log in first.");
+                            }
+                            break;
+                        case "WITHDRAW":
+                            amount = Double.parseDouble(in.readLine());
+                            if (username != null && userDatabase.containsKey(username)) {
+                                double currentBalance = accountBalances.getOrDefault(username, 0.0);
+                                if (amount <= currentBalance) {
+                                    accountBalances.put(username, currentBalance - amount);
+                                    out.println("Withdrawal successful. New balance: $" + accountBalances.get(username));
+                                } else {
+                                    out.println("ERROR: Insufficient funds.");
+                                }
+                            } else {
+                                out.println("ERROR: You need to log in first.");
+                            }
+                            break;
                         default:
-                            // Handle unknown requests or keep alive messages
+                            out.println("ERROR: Unknown request.");
                             break;
                     }
                 }
-
             } catch (IOException ex) {
                 System.out.println("Server exception: " + ex.getMessage());
                 ex.printStackTrace();
@@ -66,18 +109,15 @@ public class BankServer {
 
         private synchronized String registerUser(String username, String password) {
             if (userDatabase.containsKey(username)) {
-                // User already exists
                 return "ERROR: User already exists. Please try a different username.";
             } else {
-                // Here is where you would hash the password in a real system
-                userDatabase.put(username, password);
-                // Registration successful
+                userDatabase.put(username, password); // In production, use hashed password
+                accountBalances.put(username, 0.0);
                 return "SUCCESS: User registered successfully.";
             }
         }
 
         private synchronized boolean loginUser(String username, String password) {
-
             String storedPassword = userDatabase.get(username);
             return storedPassword != null && storedPassword.equals(password);
         }
