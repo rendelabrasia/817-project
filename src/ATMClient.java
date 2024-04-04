@@ -12,11 +12,13 @@ import java.util.Date;
 
 public class ATMClient {
     private static final String SERVER_ADDRESS = "localhost";
-    private static final int SERVER_PORT = 12345;
+    private static final int SERVER_PORT = 15008;
     private static final String ALGORITHM = "AES/ECB/PKCS5Padding";
+    private static final String MAC_ALGORITHM = "HmacSHA256"; 
     private static final String keyString = "mySimpleSharedKey";
     private static final byte[] keyBytes = keyString.getBytes(StandardCharsets.UTF_8);
     private static final SecretKey sharedKey = new SecretKeySpec(Arrays.copyOf(keyBytes, 16), "AES");
+    private static final SecretKey macKey = new SecretKeySpec(Arrays.copyOf(keyBytes, 16), MAC_ALGORITHM);
 
     public static void main(String[] args) {
         try (Socket socket = new Socket(SERVER_ADDRESS, SERVER_PORT);
@@ -101,23 +103,27 @@ public class ATMClient {
             throws IOException {
         switch (action) {
 
-        // IT DOESNT WANT TO GO BACK TO THE SELECT AN ACTION PROMPT
-
             case "3": // VIEW BALANCE
                 out.println("VIEW BALANCE");
                 String encryptedResponse = in.readLine(); // Receive encrypted balance
+                String receivedMAC = in.readLine(); // Receive MAC
                 System.out.println("Received encrypted balance info: " + encryptedResponse); // For debugging
                 try {
                     String decryptedResponse = decrypt(encryptedResponse, sharedKey);
-                    System.out.println("Decrypted balance info: " + decryptedResponse); // Show decrypted message
-                    logAction("VIEW BALANCE", "Requested");
+
+                    // Verify MAC for integrity
+                    if (verifyMAC(encryptedResponse, receivedMAC, macKey)) {
+                        System.out.println("Decrypted balance info: " + decryptedResponse); // Show decrypted message
+                        // logAction("VIEW BALANCE", "Requested");
+                    } else {
+                        System.out.println("Integrity check failed! Response might be tampered.");
+                    }
+                    
                 } catch (Exception e) {
                     System.err.println("Decryption error: " + e.getMessage());
                     e.printStackTrace();
                 }
                 break;
-
-         // IT DOESNT WANT TO GO BACK TO THE SELECT AN ACTION PROMPT
 
             case "4": // DEPOSIT
                 System.out.println("Enter amount to deposit:");
@@ -126,19 +132,24 @@ public class ATMClient {
                 out.println(amount);
                 // Read the encrypted response from the server
                 encryptedResponse = in.readLine();
+                receivedMAC = in.readLine(); // Receive MAC
                 System.out.println("Received encrypted deposit confirmation: " + encryptedResponse); // Print the encrypted message
                 // Decrypt the response
                 try {
                     String decryptedResponse = decrypt(encryptedResponse, sharedKey);
-                    System.out.println("Decrypted deposit confirmation: " + decryptedResponse); // Display the decrypted message
+
+                    // Verify MAC for integrity
+                    if (verifyMAC(encryptedResponse, receivedMAC, macKey)) {
+                        System.out.println("Decrypted deposit confirmation: " + decryptedResponse); // Display the decrypted message
+                    } else {
+                        System.out.println("Integrity check failed! Response might be tampered.");
+                    }
+                    
                 } catch (Exception e) {
                     System.err.println("Decryption error: " + e.getMessage());
                     e.printStackTrace();
                 }
                 break;
-            
-
-         // IT DOESNT WANT TO GO BACK TO THE SELECT AN ACTION PROMPT
 
             case "5": // WITHDRAW
                 System.out.println("Enter amount to withdraw:");
@@ -147,11 +158,19 @@ public class ATMClient {
                 out.println(amount);
                 // Read the encrypted response from the server
                 encryptedResponse = in.readLine();
+                receivedMAC = in.readLine(); // Receive MAC
                 System.out.println("Received encrypted withdrawal confirmation: " + encryptedResponse); // Print the encrypted message
                 // Decrypt the response
                 try {
                     String decryptedResponse = decrypt(encryptedResponse, sharedKey);
-                    System.out.println("Decrypted withdrawal confirmation: " + decryptedResponse); // Display the decrypted message
+
+                    // Verify MAC for integrity
+                    if (verifyMAC(encryptedResponse, receivedMAC, macKey)) {
+                        System.out.println("Decrypted withdrawal confirmation: " + decryptedResponse); // Display the decrypted message
+                    } else {
+                        System.out.println("Integrity check failed! Response might be tampered.");
+                    }
+                    
                 } catch (Exception e) {
                     System.err.println("Decryption error: " + e.getMessage());
                     e.printStackTrace();
@@ -161,8 +180,11 @@ public class ATMClient {
         }
 
         // Read and display server response for valid actions
+        System.out.println("\nReading Server Response....");
         String serverResponse = in.readLine();
+        System.out.println("\nServer response received....");
         System.out.println(serverResponse);
+        System.out.println("\nFunctionality Successful!");
     }
 
     private static void logAction(String action, String amount) {
@@ -250,5 +272,13 @@ public class ATMClient {
         SecretKey macKey = new SecretKeySpec(macKeyBytes, "AES"); // Use "HmacSHA256" for HMAC operations
 
         return new SecretKey[] { encryptionKey, macKey };
+    }
+
+    private static boolean verifyMAC(String data, String receivedMAC, SecretKey key) throws Exception {
+        Mac mac = Mac.getInstance(MAC_ALGORITHM);
+        mac.init(key);
+        byte[] macBytes = mac.doFinal(data.getBytes());
+        String calculatedMAC = Base64.getEncoder().encodeToString(macBytes);
+        return calculatedMAC.equals(receivedMAC);
     }
 }
