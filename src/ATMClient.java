@@ -1,16 +1,14 @@
-import javax.crypto.Cipher;
-import javax.crypto.SecretKey;
+import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.*;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Date;
 
 public class ATMClient {
     private static final String SERVER_ADDRESS = "localhost";
@@ -22,37 +20,38 @@ public class ATMClient {
 
     public static void main(String[] args) {
         try (Socket socket = new Socket(SERVER_ADDRESS, SERVER_PORT);
-             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-             BufferedReader stdIn = new BufferedReader(new InputStreamReader(System.in))) {
-
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                BufferedReader stdIn = new BufferedReader(new InputStreamReader(System.in))) {
+    
             System.out.println("Connected to the bank server.");
             if (!loginOrRegister(out, in, stdIn)) {
                 return; // Stop execution if login/register fails
             }
 
-            String userAction;
             while (true) {
                 System.out.println("\nSelect an action:");
                 System.out.println("(3) View Balance, (4) Deposit Money, (5) Withdraw Money, (6) Quit");
-                userAction = stdIn.readLine();
-
+                String userAction = stdIn.readLine();
+    
                 if ("6".equals(userAction)) {
                     out.println("QUIT");
                     System.out.println("Thank you for using the bank service.");
                     break; // Exit loop to end program
                 }
-
+    
                 processUserAction(out, in, stdIn, userAction);
             }
-
+    
         } catch (Exception e) {
             System.err.println("An error occurred: " + e.getMessage());
             e.printStackTrace();
         }
     }
+    
 
-    private static boolean loginOrRegister(PrintWriter out, BufferedReader in, BufferedReader stdIn) throws IOException {
+    private static boolean loginOrRegister(PrintWriter out, BufferedReader in, BufferedReader stdIn)
+            throws IOException {
         System.out.println("Do you want to (1) Register or (2) Login? (Enter 1 or 2)");
         String option = stdIn.readLine();
 
@@ -98,31 +97,89 @@ public class ATMClient {
         return "LOGGED IN".equals(serverResponse);
     }
 
-    private static void processUserAction(PrintWriter out, BufferedReader in, BufferedReader stdIn, String action) throws IOException {
+    private static void processUserAction(PrintWriter out, BufferedReader in, BufferedReader stdIn, String action)
+            throws IOException {
         switch (action) {
-            case "3":
+
+        // IT DOESNT WANT TO GO BACK TO THE SELECT AN ACTION PROMPT
+
+            case "3": // VIEW BALANCE
                 out.println("VIEW BALANCE");
+                String encryptedResponse = in.readLine(); // Receive encrypted balance
+                System.out.println("Received encrypted balance info: " + encryptedResponse); // For debugging
+                try {
+                    String decryptedResponse = decrypt(encryptedResponse, sharedKey);
+                    System.out.println("Decrypted balance info: " + decryptedResponse); // Show decrypted message
+                    logAction("VIEW BALANCE", "Requested");
+                } catch (Exception e) {
+                    System.err.println("Decryption error: " + e.getMessage());
+                    e.printStackTrace();
+                }
                 break;
-            case "4":
+
+         // IT DOESNT WANT TO GO BACK TO THE SELECT AN ACTION PROMPT
+
+            case "4": // DEPOSIT
                 System.out.println("Enter amount to deposit:");
                 String amount = stdIn.readLine();
                 out.println("DEPOSIT");
                 out.println(amount);
+                // Read the encrypted response from the server
+                encryptedResponse = in.readLine();
+                System.out.println("Received encrypted deposit confirmation: " + encryptedResponse); // Print the encrypted message
+                // Decrypt the response
+                try {
+                    String decryptedResponse = decrypt(encryptedResponse, sharedKey);
+                    System.out.println("Decrypted deposit confirmation: " + decryptedResponse); // Display the decrypted message
+                } catch (Exception e) {
+                    System.err.println("Decryption error: " + e.getMessage());
+                    e.printStackTrace();
+                }
                 break;
-            case "5":
+            
+
+         // IT DOESNT WANT TO GO BACK TO THE SELECT AN ACTION PROMPT
+
+            case "5": // WITHDRAW
                 System.out.println("Enter amount to withdraw:");
                 amount = stdIn.readLine();
                 out.println("WITHDRAW");
                 out.println(amount);
+                // Read the encrypted response from the server
+                encryptedResponse = in.readLine();
+                System.out.println("Received encrypted withdrawal confirmation: " + encryptedResponse); // Print the encrypted message
+                // Decrypt the response
+                try {
+                    String decryptedResponse = decrypt(encryptedResponse, sharedKey);
+                    System.out.println("Decrypted withdrawal confirmation: " + decryptedResponse); // Display the decrypted message
+                } catch (Exception e) {
+                    System.err.println("Decryption error: " + e.getMessage());
+                    e.printStackTrace();
+                }
                 break;
-            default:
-                System.out.println("Invalid action.");
-                return; // Skip the rest if action is invalid
+            
         }
 
         // Read and display server response for valid actions
         String serverResponse = in.readLine();
         System.out.println(serverResponse);
+    }
+
+    private static void logAction(String action, String amount) {
+        try {
+            BufferedWriter writer = new BufferedWriter(new FileWriter("audit_log.txt", true));
+            writer.write(getCurrentDateTime() + " - " + action + ", Amount: $" + amount);
+            writer.newLine();
+            writer.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static String getCurrentDateTime() {
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        Date date = new Date();
+        return formatter.format(date);
     }
 
     private static void performKeyDistributionProtocol(PrintWriter out, BufferedReader in) throws IOException {
@@ -183,7 +240,8 @@ public class ATMClient {
         MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
         byte[] hash = sha256.digest(masterSecret.getEncoded());
 
-        // Split the hash in half; use the first part for the encryption key, the second part for the MAC key
+        // Split the hash in half; use the first part for the encryption key, the second
+        // part for the MAC key
         byte[] encryptionKeyBytes = Arrays.copyOfRange(hash, 0, hash.length / 2);
         byte[] macKeyBytes = Arrays.copyOfRange(hash, hash.length / 2, hash.length);
 
@@ -191,7 +249,6 @@ public class ATMClient {
         SecretKey encryptionKey = new SecretKeySpec(encryptionKeyBytes, "AES");
         SecretKey macKey = new SecretKeySpec(macKeyBytes, "AES"); // Use "HmacSHA256" for HMAC operations
 
-        return new SecretKey[]{encryptionKey, macKey};
+        return new SecretKey[] { encryptionKey, macKey };
     }
-
 }
